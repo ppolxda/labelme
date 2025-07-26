@@ -55,7 +55,7 @@ class DataRow:
 
     @property
     def shapes(self):
-        if self.visibility == 0 or self.width == 0 or self.height == 0:
+        if self.visibility == 0 or self.centerY <= 0 or self.centerY <= 0:
             return []
 
         half_width = self.width / 2
@@ -149,12 +149,16 @@ class LabelCsv(object):
                     centerX=float(row["X"]),
                     centerY=float(row["Y"]),
                     visibility=int(row["Visibility"]),
-                    width=float(row["W"]) if "W" in row else 20.0,
-                    height=float(row["H"]) if "H" in row else 20.0,
+                    width=float(row["W"])
+                    if "W" in row and float(row["W"]) > 0
+                    else 25.0,
+                    height=float(row["H"])
+                    if "H" in row and float(row["H"]) > 0
+                    else 25.0,
                 )
 
                 # 如果为空点，则将其设置为 DataRow 的默认值
-                if point.centerX == 0 or point.centerY == 0 or point.visibility == 0:
+                if point.centerX <= 0 or point.centerY <= 0 or point.visibility == 0:
                     point = DataRow.from_shape("empty", point.frame)
 
                 self.points.append(point)
