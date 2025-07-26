@@ -139,6 +139,13 @@ class LabelCsv(object):
         """
         self.points = []
         self.filename = filename
+        images = os.listdir(self.frameDirname)
+        self.images = natsort.os_sorted(images)
+
+        # 默认视频帧，所以图片大小一致，只加载一次
+        imagePath = osp.join(self.frameDirname, self.images[0])
+        with Image.open(imagePath) as image:
+            self.width, self.height = image.size
 
         with open(filename, "r") as csvfile:
             reader = csv.DictReader(csvfile)
@@ -149,21 +156,27 @@ class LabelCsv(object):
                     centerX=float(row["X"]),
                     centerY=float(row["Y"]),
                     visibility=int(row["Visibility"]),
-                    width=float(row["W"])
-                    if "W" in row and float(row["W"]) > 0
-                    else 25.0,
-                    height=float(row["H"])
-                    if "H" in row and float(row["H"]) > 0
-                    else 25.0,
+                    width=float(row["W"]) if "W" in row and float(row["W"]) > 0 else 0,
+                    height=float(row["H"]) if "H" in row and float(row["H"]) > 0 else 0,
                 )
+                # 重新计算边界，避免超出范围
+                if point.width <= 0 or point.height <= 0:
+                    default_size = 25.0
+                    half_size = default_size / 2
+                    x0 = max(0, point.centerX - half_size)
+                    x1 = min(self.width, point.centerX + half_size)
+                    y0 = max(0, point.centerY - half_size)
+                    y1 = min(self.height, point.centerY + half_size)
+                    point.width = x1 - x0
+                    point.height = y1 - y0
+                    point.centerX = (x0 + x1) / 2
+                    point.centerY = (y0 + y1) / 2
 
                 # 如果为空点，则将其设置为 DataRow 的默认值
                 if point.centerX <= 0 or point.centerY <= 0 or point.visibility == 0:
                     point = DataRow.from_shape("empty", point.frame)
 
                 self.points.append(point)
-                self.images = os.listdir(self.frameDirname)
-                self.images = natsort.os_sorted(self.images)
                 # self.generateLabelfile(point)
 
             # # Create a shape for the trajectory
@@ -186,13 +199,6 @@ class LabelCsv(object):
 
         if not osp.exists(self.labelmeDirname):
             os.makedirs(self.labelmeDirname)
-
-        imagePath = osp.join(self.frameDirname, self.images[imageSeq])
-
-        # 默认视频帧，所以图片大小一致，只加载一次
-        if self.height == 0 or self.width == 0:
-            with Image.open(imagePath) as image:
-                self.width, self.height = image.size
 
         filename = osp.join(self.labelmeDirname, f"{imageSeq}.json")
         lf = LabelFile()
