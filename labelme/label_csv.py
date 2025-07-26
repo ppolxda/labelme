@@ -222,7 +222,7 @@ class LabelCsv(object):
         )
         self.points[point.frame] = point
 
-    def save(self):
+    def save(self, save_point_only=False):
         """
         Save the points to the CSV file.
         """
@@ -231,7 +231,12 @@ class LabelCsv(object):
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
             for point in self.points:
-                writer.writerow(point.point)
+                point_ = point.point
+                if save_point_only:
+                    point_["W"] = 0
+                    point_["H"] = 0
+
+                writer.writerow(point_)
 
     @classmethod
     def imagePath2ImageSeq(cls, imagePath):

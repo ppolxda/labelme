@@ -298,6 +298,14 @@ class MainWindow(QtWidgets.QMainWindow):
             checked=self._config["store_data"],
         )
 
+        saveWithPointOnlyCsv = action(
+            text=self.tr("Save With Point Only Csv"),
+            slot=self.enableSavePointOnly,
+            tip=self.tr("Save label to point only csv file"),
+            checkable=True,
+            checked=self._config["save_point_only"],
+        )
+
         close = action(
             self.tr("&Close"),
             self.closeFile,
@@ -609,6 +617,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.actions = utils.struct(  # type: ignore[assignment,method-assign]
             saveAuto=saveAuto,
             saveWithImageData=saveWithImageData,
+            saveWithPointOnlyCsv=saveWithPointOnlyCsv,
             changeOutputDir=changeOutputDir,
             save=save,
             saveAs=saveAs,
@@ -720,7 +729,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 saveAs,
                 saveAuto,
                 changeOutputDir,
+                None,
                 saveWithImageData,
+                saveWithPointOnlyCsv,
+                None,
                 close,
                 deleteFile,
                 None,
@@ -1459,7 +1471,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     shape["shape_type"], imageSeq, shape["points"]
                 )
                 labelCsv.changePoint(point)
-                labelCsv.save()
+                labelCsv.save(self._config["save_point_only"])
 
             lf.save(
                 filename=filename,
@@ -1844,6 +1856,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def enableSaveImageWithData(self, enabled):
         self._config["store_data"] = enabled
         self.actions.saveWithImageData.setChecked(enabled)  # type: ignore[attr-defined]
+
+    def enableSavePointOnly(self, enabled):
+        self._config["save_point_only"] = enabled
+        self.actions.saveWithPointOnlyCsv.setChecked(enabled)  # type: ignore[attr-defined]
 
     def closeEvent(self, event):
         if not self.mayContinue():
