@@ -20,6 +20,8 @@ from PyQt5.QtCore import Qt
 from labelme import __appname__
 from labelme._automation import bbox_from_text
 from labelme.config import get_config
+from labelme.label_csv import DataRow
+from labelme.label_csv import LabelCsv
 from labelme.label_file import LabelFile
 from labelme.label_file import LabelFileError
 from labelme.shape import Shape
@@ -129,9 +131,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.uniqLabelList = UniqueLabelQListWidget()
         self.uniqLabelList.setToolTip(
-            self.tr(
-                "Select label to start annotating for it. " "Press 'Esc' to deselect."
-            )
+            self.tr("Select label to start annotating for it. Press 'Esc' to deselect.")
         )
         if self._config["labels"]:
             for label in self._config["labels"]:
@@ -819,6 +819,8 @@ class MainWindow(QtWidgets.QMainWindow):
             save,
             deleteFile,
             None,
+            createPointMode,
+            createRectangleMode,
             createMode,
             editMode,
             duplicate,
@@ -899,6 +901,16 @@ class MainWindow(QtWidgets.QMainWindow):
         # if self.firstStart:
         #    QWhatsThis.enterWhatsThisMode()
 
+    def getOutputPath(self, label_file):
+        label_file_without_path = osp.basename(label_file)
+
+        label_csv = self.getLabelCsv()
+        if label_csv:
+            label_file = osp.join(label_csv.labelmeDirname, label_file_without_path)
+        elif self.output_dir:
+            label_file = osp.join(self.output_dir, label_file_without_path)
+        return label_file
+
     def menu(self, title, actions=None):
         menu = self.menuBar().addMenu(title)  # type: ignore[union-attr]
         if actions:
@@ -946,9 +958,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         if self._config["auto_save"] or self.actions.saveAuto.isChecked():  # type: ignore[attr-defined]
             label_file = osp.splitext(self.imagePath)[0] + ".json"  # type: ignore[arg-type]
-            if self.output_dir:
-                label_file_without_path = osp.basename(label_file)
-                label_file = osp.join(self.output_dir, label_file_without_path)
+            label_file = self.getOutputPath(label_file)
             self.saveLabels(label_file)
             return
         self.dirty = True
@@ -1052,12 +1062,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.loadShapes(shapes, replace=False)
         self.setDirty()
 
-    def resetState(self):
+    def resetState(self, cleanCsv=True):
         self.labelList.clear()
         self.filename = None
         self.imagePath = None
         self.imageData = None
         self.labelFile = None
+        if cleanCsv:
+            self.labelCsv = None
         self.otherData = None
         self.canvas.resetState()
 
@@ -1267,7 +1279,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if currIndex < len(self.imageList):
             filename = self.imageList[currIndex]
             if filename:
-                self.loadFile(filename)
+                self.loadFile(filename, False)
 
     # React to canvas signals.
     def shapeSelectionChanged(self, selected_shapes):
@@ -1433,6 +1445,22 @@ class MainWindow(QtWidgets.QMainWindow):
             imageData = self.imageData if self._config["store_data"] else None
             if osp.dirname(filename) and not osp.exists(osp.dirname(filename)):
                 os.makedirs(osp.dirname(filename))
+
+            labelCsv = self.getLabelCsv()
+            if labelCsv:
+                if len(shapes) != 1:
+                    raise LabelFileError(
+                        "Label CSV file can only be saved with a single shape."
+                    )
+
+                shape = shapes[0]
+                imageSeq = LabelCsv.imagePath2ImageSeq(imagePath)
+                point = DataRow.from_shape(
+                    shape["shape_type"], imageSeq, shape["points"]
+                )
+                labelCsv.changePoint(point)
+                labelCsv.save()
+
             lf.save(
                 filename=filename,
                 shapes=shapes,
@@ -1625,7 +1653,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 flag = item.checkState() == Qt.Unchecked  # type: ignore[attr-defined]
             item.setCheckState(Qt.Checked if flag else Qt.Unchecked)  # type: ignore[attr-defined]
 
-    def loadFile(self, filename=None):
+    def loadFile(self, filename=None, cleanCsv=True):
         """Load the specified file, or the last opened file if None."""
         # changing fileListWidget loads file
         if filename in self.imageList and (
@@ -1635,7 +1663,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.fileListWidget.repaint()
             return
 
-        self.resetState()
+        # 如果是CSV文件，则调用自动创建兼容配置
+        labelCsv = self.getLabelCsv()
+        if not cleanCsv and labelCsv:
+            labelCsv.generateLabelfileByImagePath(self.filename)
+
+        self.resetState(cleanCsv)
         self.canvas.setEnabled(False)
         if filename is None:
             filename = self.settings.value("filename", "")
@@ -1649,9 +1682,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # assumes same name, but json extension
         self.status(str(self.tr("Loading %s...")) % osp.basename(str(filename)))
         label_file = osp.splitext(filename)[0] + ".json"
-        if self.output_dir:
-            label_file_without_path = osp.basename(label_file)
-            label_file = osp.join(self.output_dir, label_file_without_path)
+        label_file = self.getOutputPath(label_file)
         if QtCore.QFile.exists(label_file) and LabelFile.is_label_file(label_file):
             try:
                 self.labelFile = LabelFile(label_file)
@@ -1659,8 +1690,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.errorMessage(
                     self.tr("Error opening file"),
                     self.tr(
-                        "<p><b>%s</b></p>"
-                        "<p>Make sure <i>%s</i> is a valid label file."
+                        "<p><b>%s</b></p><p>Make sure <i>%s</i> is a valid label file."
                     )
                     % (e, label_file),
                 )
@@ -1754,6 +1784,25 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status(str(self.tr("Loaded %s")) % osp.basename(str(filename)))
         return True
 
+    def loadCsvFile(self, filename=None):
+        """Load the specified file, or the last opened file if None."""
+        self.resetState()
+        self.canvas.setEnabled(False)
+        if filename is None:
+            filename = self.settings.value("filename", "")
+
+        filename = str(filename)
+        if not QtCore.QFile.exists(filename):
+            self.errorMessage(
+                self.tr("Error opening file"),
+                self.tr("No such file: <b>%s</b>") % filename,
+            )
+            return False
+
+        self.status(str(self.tr("Loading csv file %s")) % osp.basename(str(filename)))
+        self.labelCsv = LabelCsv(filename)
+        self.importDirImages(self.labelCsv.frameDirname)
+
     def resizeEvent(self, event):
         if (
             self.canvas
@@ -1830,7 +1879,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def loadRecent(self, filename):
         if self.mayContinue():
-            self.loadFile(filename)
+            self.loadFile(filename, False)
 
     def openPrevImg(self, _value=False):
         keep_prev = self._config["keep_prev"]
@@ -1852,7 +1901,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if currIndex - 1 >= 0:
             filename = self.imageList[currIndex - 1]
             if filename:
-                self.loadFile(filename)
+                self.loadFile(filename, False)
 
         self._config["keep_prev"] = keep_prev
 
@@ -1881,7 +1930,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.filename = filename
 
         if self.filename and load:
-            self.loadFile(self.filename)
+            self.loadFile(self.filename, False)
 
         self._config["keep_prev"] = keep_prev
 
@@ -1894,7 +1943,7 @@ class MainWindow(QtWidgets.QMainWindow):
             for fmt in QtGui.QImageReader.supportedImageFormats()
         ]
         filters = self.tr("Image & Label files (%s)") % " ".join(
-            formats + ["*%s" % LabelFile.suffix]
+            formats + ["*%s" % LabelFile.suffix] + ["*%s" % LabelCsv.suffix]
         )
         fileDialog = FileDialogPreview(self)
         fileDialog.setFileMode(FileDialogPreview.ExistingFile)
@@ -1907,10 +1956,16 @@ class MainWindow(QtWidgets.QMainWindow):
         if fileDialog.exec_():
             fileName = fileDialog.selectedFiles()[0]
             if fileName:
-                self.loadFile(fileName)
+                if fileName.lower().endswith(LabelCsv.suffix):
+                    self.loadCsvFile(fileName)
+                else:
+                    self.loadFile(fileName)
 
     def changeOutputDirDialog(self, _value=False):
+        label_csv: LabelCsv = self.getLabelCsv()
         default_output_dir = self.output_dir
+        if default_output_dir is None and label_csv:
+            default_output_dir = label_csv.labelmeDirname
         if default_output_dir is None and self.filename:
             default_output_dir = osp.dirname(self.filename)
         if default_output_dir is None:
@@ -1962,7 +2017,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def saveFileDialog(self):
         caption = self.tr("%s - Choose File") % __appname__
         filters = self.tr("Label files (*%s)") % LabelFile.suffix
-        if self.output_dir:
+        labelCsv = self.getLabelCsv()
+        if labelCsv:
+            dlg = QtWidgets.QFileDialog(self, caption, labelCsv.labelmeDirname, filters)
+        elif self.output_dir:
             dlg = QtWidgets.QFileDialog(self, caption, self.output_dir, filters)
         else:
             dlg = QtWidgets.QFileDialog(self, caption, self.currentPath(), filters)
@@ -1971,7 +2029,11 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.setOption(QtWidgets.QFileDialog.DontConfirmOverwrite, False)
         dlg.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, False)
         basename = osp.basename(osp.splitext(self.filename)[0])
-        if self.output_dir:
+        if labelCsv:
+            default_labelfile_name = osp.join(
+                labelCsv.labelmeDirname, basename + LabelFile.suffix
+            )
+        elif self.output_dir:
             default_labelfile_name = osp.join(
                 self.output_dir, basename + LabelFile.suffix
             )
@@ -2008,13 +2070,12 @@ class MainWindow(QtWidgets.QMainWindow):
             label_file = self.filename
         else:
             label_file = osp.splitext(self.filename)[0] + ".json"
-
         return label_file
 
     def deleteFile(self):
         mb = QtWidgets.QMessageBox
         msg = self.tr(
-            "You are about to permanently delete this label file, " "proceed anyway?"
+            "You are about to permanently delete this label file, proceed anyway?"
         )
         answer = mb.warning(self, self.tr("Attention"), msg, mb.Yes | mb.No)
         if answer != mb.Yes:
@@ -2092,7 +2153,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def deleteSelectedShape(self):
         yes, no = QtWidgets.QMessageBox.Yes, QtWidgets.QMessageBox.No
         msg = self.tr(
-            "You are about to permanently delete {} polygons, " "proceed anyway?"
+            "You are about to permanently delete {} polygons, proceed anyway?"
         ).format(len(self.canvas.selectedShapes))
         if yes == QtWidgets.QMessageBox.warning(
             self, self.tr("Attention"), msg, yes | no, yes
@@ -2133,6 +2194,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 | QtWidgets.QFileDialog.DontResolveSymlinks,
             )
         )
+        self.labelCsv = None
         self.importDirImages(targetDirPath)
 
     @property
@@ -2154,9 +2216,8 @@ class MainWindow(QtWidgets.QMainWindow):
             if file in self.imageList or not file.lower().endswith(tuple(extensions)):
                 continue
             label_file = osp.splitext(file)[0] + ".json"
-            if self.output_dir:
-                label_file_without_path = osp.basename(label_file)
-                label_file = osp.join(self.output_dir, label_file_without_path)
+            label_file = self.getOutputPath(label_file)
+
             item = QtWidgets.QListWidgetItem(file)
             item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)  # type: ignore[attr-defined]
             if QtCore.QFile.exists(label_file) and LabelFile.is_label_file(label_file):
@@ -2190,12 +2251,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 pass
         for filename in filenames:
             label_file = osp.splitext(filename)[0] + ".json"
-            if self.output_dir:
-                label_file_without_path = osp.basename(label_file)
-                label_file = osp.join(self.output_dir, label_file_without_path)
+            label_file = self.getOutputPath(label_file)
+            label_csv = self.getLabelCsv()
+
             item = QtWidgets.QListWidgetItem(filename)
             item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)  # type: ignore[attr-defined]
-            if QtCore.QFile.exists(label_file) and LabelFile.is_label_file(label_file):
+            # 如果是CSV文件，则检查是否存在对应的标签文件
+            if label_csv or (
+                QtCore.QFile.exists(label_file) and LabelFile.is_label_file(label_file)
+            ):
                 item.setCheckState(Qt.Checked)  # type: ignore[attr-defined]
             else:
                 item.setCheckState(Qt.Unchecked)  # type: ignore[attr-defined]
@@ -2216,3 +2280,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     images.append(relativePath)
         images = natsort.os_sorted(images)
         return images
+
+    def getLabelCsv(self) -> LabelCsv | None:
+        """Get the label csv file if it exists."""
+        return getattr(self, "labelCsv", None)
