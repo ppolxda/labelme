@@ -1460,16 +1460,20 @@ class MainWindow(QtWidgets.QMainWindow):
 
             labelCsv = self.getLabelCsv()
             if labelCsv:
-                if len(shapes) != 1:
+                if len(shapes) not in [0, 1]:
                     raise LabelFileError(
                         "Label CSV file can only be saved with a single shape."
                     )
 
-                shape = shapes[0]
+                shape = shapes[0] if shapes else None
                 imageSeq = LabelCsv.imagePath2ImageSeq(imagePath)
-                point = DataRow.from_shape(
-                    shape["shape_type"], imageSeq, shape["points"]
-                )
+                if shape:
+                    point = DataRow.from_shape(
+                        shape["shape_type"], imageSeq, shape["points"]
+                    )
+                else:
+                    point = DataRow.from_shape("empty", imageSeq)
+
                 labelCsv.changePoint(point)
                 labelCsv.save(self._config["save_point_only"])
 
@@ -1678,7 +1682,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # 如果是CSV文件，则调用自动创建兼容配置
         labelCsv = self.getLabelCsv()
         if not cleanCsv and labelCsv:
-            labelCsv.generateLabelfileByImagePath(self.filename)
+            labelCsv.generateLabelfileByImagePath(filename)
 
         self.resetState(cleanCsv)
         self.canvas.setEnabled(False)
