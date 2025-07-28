@@ -225,6 +225,13 @@ class Shape(object):
                         self._scale_point(self.points[1]),
                     )
                     line_path.addRect(rectangle)
+
+                    # 增加重心点，方便观察标注情况
+                    center_x = (rectangle.x() + rectangle.x()) / 2
+                    center_y = (rectangle.y() + rectangle.y()) / 2
+                    center_point = QtCore.QPointF(center_x, center_y)
+                    line_path.addEllipse(center_point, 2, 2)
+
                 if self.shape_type == "rectangle":
                     for i in range(len(self.points)):
                         self.drawVertex(vrtx_path, i)
