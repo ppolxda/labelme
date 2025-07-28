@@ -35,6 +35,7 @@ from labelme.widgets import LabelListWidgetItem
 from labelme.widgets import ToolBar
 from labelme.widgets import UniqueLabelQListWidget
 from labelme.widgets import ZoomWidget
+from labelme.widgets.auto_next_widget import AutoNextWidget
 
 from . import utils
 
@@ -822,6 +823,11 @@ class MainWindow(QtWidgets.QMainWindow):
         ai_prompt_action = QtWidgets.QWidgetAction(self)
         ai_prompt_action.setDefaultWidget(self._ai_prompt_widget)
 
+        # --- Auto Next Widget 集成 ---
+        self._auto_next_widget = AutoNextWidget(on_submit=self.openNextImg, parent=self)
+        autoNextAction = QtWidgets.QWidgetAction(self)
+        autoNextAction.setDefaultWidget(self._auto_next_widget)
+
         self.tools = self.toolbar("Tools")
         self.actions.tool = (  # type: ignore[attr-defined]
             open_,
@@ -845,6 +851,7 @@ class MainWindow(QtWidgets.QMainWindow):
             None,
             selectAiModel,
             None,
+            autoNextAction,  # 插入到工具栏
             ai_prompt_action,
         )
 
@@ -1947,6 +1954,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 filename = self.imageList[currIndex + 1]
             else:
                 filename = self.imageList[-1]
+
+                # Finish stop
+                self._auto_next_widget.stop()
+
         self.filename = filename
 
         if self.filename and load:
@@ -2247,12 +2258,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self.fileListWidget.addItem(item)
 
         if len(self.imageList) > 1:
+            self._auto_next_widget.setEnabled(True)
             self.actions.openNextImg.setEnabled(True)  # type: ignore[attr-defined]
             self.actions.openPrevImg.setEnabled(True)  # type: ignore[attr-defined]
 
         self.openNextImg()
 
     def importDirImages(self, dirpath, pattern=None, load=True):
+        self._auto_next_widget.setEnabled(True)
         self.actions.openNextImg.setEnabled(True)  # type: ignore[attr-defined]
         self.actions.openPrevImg.setEnabled(True)  # type: ignore[attr-defined]
 
@@ -2284,6 +2297,7 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 item.setCheckState(Qt.Unchecked)  # type: ignore[attr-defined]
             self.fileListWidget.addItem(item)
+
         self.openNextImg(load=load)
 
     def scanAllImages(self, folderPath):
